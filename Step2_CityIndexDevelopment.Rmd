@@ -1,0 +1,900 @@
+---
+title: "Step2: City Index Development"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+  markdown: 
+    wrap: 72
+---
+
+**Step 2: City Index Development** The EQI development occurs at twos
+steps: First, all the exposure datasets for a single city are combined
+and organized into a single file. Second, initial data checks and
+descriptive statistics are calculated
+
+**Packages** All packages are referenced using the :: command.
+Therefore, they just need to be installed for the code to work. The only
+package that needs to be turned on manually prior to the code being run
+is tidyverse
+
+List of packages needed:
+
+-   tidyverse
+
+-   sf
+
+-   sp
+
+-   easystats
+    (<https://easystats.github.io/easystats/articles/citation.html>)
+
+**Save locations and Naming Conventions** Each combined city output is
+saved as "cityname.shp" within the "combined" folder in the "derived"
+data section. Example:
+"/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/combined/cityname.shp"
+
+This takes the outputs of part 1 and combines and renames the columns to
+be more meaningful for each city
+
+```{r}
+source("/Users/zoedavis/Documents/GitHub/EQI_final/functions/combine_data_by_cities.R")
+
+# note, skip kanata; part of Ottawa
+combined_city <- combine_data_by_cities(path_to_city_folder = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/montreal",
+                            census = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/DAs/montrealmetro2.shp",
+                            shapefile_save_loc = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/combined/montreal")
+head(combined_city)
+x <- combined_city[rowSums(is.na(combined_city)) >0,]
+
+# plot to check 
+combined_city %>% 
+    ggplot() +
+    geom_sf(aes(fill= as.numeric(d_h_temp)))
+
+# "DAUID" = DA ID     
+# "PRNAME" = province name   
+# "CDNAME" = 
+# "CSDNAME" =   
+# "DA_area" = area of the DA (m^2) 
+# "cold_temp" = average temperature in each DA during cold event
+# "d_c_temp" = difference between mean temperature of city and DA during cold event
+# "ndvi_2014" = average NDVI for 2014
+# "ndvi_2015" = average NDVI for 2015
+# "ndvi_2016" = average NDVI for 2016
+# "ndvi_2017" = average NDVI for 2017
+# "ndvi_2018" = average NDVI for 2018
+# "pm25_2014" = average PM2.5 concentration for 2014 
+# "pm25_2015" = average PM2.5 concentration for 2015 
+# "pm25_2016" = average PM2.5 concentration for 2016 
+# "pm25_2017" = average PM2.5 concentration for 2017 
+# "pm25_2018" = average PM2.5 concentration for 2018 
+# "nearest_pp" = distance to nearest power plant (coal, gas, oil)
+# "rd_lngt" = road length = sum of lengths of road (class 1,2,3,4) within each DA
+# "num_nds" = number nodes = number of intersection of roads (class 1,2,3,4) within each DA *** REMOVE ***
+# hot_temp = average temperature of the DA during heat event
+# d_h_temp = difference between average temperature of city and DA during heat
+# "m_d_do_sl"  = mean daily dose of vitamin D at sea level
+# "water_dist" = distance to nearest body of fresh or salt water
+# "water_area" = area (m^2) of water within each DA
+# "geometry"  = spatial geometry layer
+
+# repeat for each city
+```
+
+Reorganize by year - this makes the "EQI_base" file in which the year-based index is based
+```{r}
+# takes each of the individual combined city files and makes them one <3
+source("/Users/zoedavis/Documents/GitHub/EQI_final/functions/reorganize_by_year.R")
+
+reorganize_by_year(path_to_combined_files = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/combined",
+                        shapefile_save_folder = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/EQI/")
+
+
+
+# combine into single EQI file 
+file_list <- list.files("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/EQI", pattern = ".shp", full.names = T)
+
+
+x <- lapply(file_list,  sf::read_sf)
+EQI_base <- do.call(rbind, x)
+
+
+
+# check all the cities are here
+unique(EQI_base$city_name) # 30
+length(unique(EQI_base$DAUID)) #28026, correct!
+
+# plot to check
+EQI_base %>% 
+    ggplot() +
+   geom_histogram(aes(x= as.numeric(wtr_dist))) +
+  facet_wrap(.~ year, nrow=1) +
+  cowplot::theme_minimal_grid()
+
+EQI_base %>% 
+  filter(city_name == "halifax" &
+         year == 2014) |> 
+    ggplot() +
+    geom_sf(aes(fill= as.numeric(d_c_temp))) +
+  scale_fill_gradientn(colors = terrain.colors(20)) 
+
+# save base EQI file
+sf::write_sf(EQI_base, "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/index/EQI_base.shp", append=F)
+EQI_base <- sf::st_read("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/index/EQI_base.shp")
+
+
+# Check for NAs results
+x <- EQI_base[rowSums(is.na(EQI_base)) >0,]
+
+xx <- x |> 
+  sf::st_drop_geometry() |> 
+  summarize(d_c_temp_na =   sum(is.na(d_c_temp)), #55
+            no2_na =        sum(is.na(no2)),      #0
+            near_pp_na =    sum(is.na(near_pp)),  #0
+            d_h_temp_na =   sum(is.na(d_h_temp)), #50
+            rd_lngt_na =    sum(is.na(rd_lngt)),  #0
+            m_d_do_sl_na =  sum(is.na(m_d_do_sl)),#0
+            wtr_dist_na =   sum(is.na(wtr_dist)), #0
+            ndvi_na =       sum(is.na(ndvi)),    #100 (multi years)
+            pm25_na =       sum(is.na(pm25))     #165 (multi years)
+            )
+# total of 70 DAs affected
+
+```
+
+
+Add year specific data together and combine with population data and Can Marg
+```{r}
+EQI_base <- sf::read_sf("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/index/EQI_base.shp")
+
+EQI_base <- EQI_base |> 
+  drop_na()
+
+length(unique(EQI_base$DAUID)) #27956 DAs included
+
+# Add population data
+population <- read.csv("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/DA_2016_population/T1901EN.csv")
+colnames(population) <- c("DAUID", "prov_eng", "prov_fre", "geocode_prov", "geocode_censusdivision", "geocode_censussubdivision", "pop_2016", "indiansettle", "nonprivate_dwelling", "privatedwelling", "landarea_sqkm", "popdensity_sqkm")
+population <- population |> 
+  select(DAUID, pop_2016, nonprivate_dwelling, privatedwelling, landarea_sqkm, popdensity_sqkm)
+
+EQI_base <- merge(EQI_base, population, by="DAUID", all.x=T)
+
+# Add CanMarg
+canmarg <- readxl::read_excel("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/CanMarg/CAN-Marg_DA_2016.xlsx", sheet = 5)
+colnames(canmarg) <- c("DAUID", "households_dwellings_q_DA16", "material_resources_q_DA16", "age_labourforce_q_DA16",    "immigration_vismin_q_DA16", "households_dwellings_DA16", "material_resources_DA16", "age_labourforce_DA16", "immigration_vismin_DA16",     "DAPop_2016",  "Province") 
+
+EQI_base <- merge(EQI_base, canmarg, by="DAUID", all.x=T)
+
+
+# number of DAs included now that NAs have been removed
+length(unique(EQI_base$DAUID)) #27956
+
+sf::write_sf(EQI_base, "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/index/EQI_base_pop_canmarg.shp", append = F)
+
+EQI_base <- sf::read_sf("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/index/EQI_base_pop_canmarg.shp")
+# if you read this in, then you need to rename the columns because they get shortened
+colnames(EQI_base) <- c("DAUID", "PRNAME", "CDNAME", "CSDNAME", "DA_area", "cold_temp", "d_c_temp", "no2", "near_pp", "rd_lngt", "num_nds", "hot_temp", "d_h_temp", "m_d_do_sl", "wtr_dist", "wtr_area", "year", "ndvi", "pm25", "city_name", "pop_2016",   "nonprivate_dwelling", "privatedwelling", "landarea_sqkm", "popdensity_sqkm", "households_dwellings_q_DA16", "material_resources_q_DA16", "age_labourforce_q_DA16", "immigration_vismin_q_DA16", "households_dwellings_DA16", "material_resources_DA16", "age_labourforce_DA16",    "immigration_vismin_DA16", "DAPop_2016", "Province", "geometry")
+
+
+# make deciles and index
+EQI_index <- EQI_base |> 
+  group_by(year) |> 
+  mutate(no2_q        = ntile(desc(no2), 10),        #1 no2; high values = bad, therefore inverse
+         near_pp_q = ntile(near_pp, 10),             #2 power plant; high values = good
+         rd_lngt_q    = ntile(desc(rd_lngt), 10),    #3 road lengths; high value = bad, therefore inverse
+         d_c_temp_q    = ntile(d_c_temp, 10),        #4 difference in cold temps; high value = good
+         d_h_temp_q   = ntile(desc(d_h_temp), 10),   #5 difference in hot temps; high value = bad, therefore inverse 
+         m_d_do_sl_q  = ntile(m_d_do_sl, 10),        #6 vitamin D dose; high values = good
+         wtr_dist_q = ntile(desc(wtr_dist), 10),     #7 distance to water; high values = bad
+         ndvi_q       = ntile(ndvi, 10),             #8 ndvi; high values = good
+         pm25_q       = ntile(desc(pm25), 10)        #9 pm2.5; high values = bad, therefore inverse
+         ) 
+
+EQI_index<- EQI_index |> 
+  group_by(year) |> 
+  mutate(EQI = no2_q + near_pp_q + rd_lngt_q + d_c_temp_q + d_h_temp_q + m_d_do_sl_q + wtr_dist_q + ndvi_q + pm25_q,
+         EQI = EQI*10/9 # transform so that the highest value is 100 and not 90
+         )
+# check min and max EQI
+min(as.numeric(EQI_index$EQI), na.rm=T) #21.11111
+max(as.numeric(EQI_index$EQI), na.rm=T) #88.88889
+
+
+# Make GGPLOT presentable
+EQI_index$city_name <- gsub("troisrivieres", "Trois Rivieres", EQI_index$city_name) # fix trois rivieres
+EQI_index$city_name <- gsub("stjohns", "St. John's", EQI_index$city_name) # fix St. Johns
+EQI_index$city_name <- gsub("stcatharines_niagara", "St. Catharines ", EQI_index$city_name) # fix St. Catharines
+EQI_index$city_name <- tools::toTitleCase(EQI_index$city_name)
+
+unique(EQI_index$city_name)
+
+# multi-year variables
+EQI_index %>% 
+  ggplot() +
+  geom_boxplot(aes(x = reorder(city_name, d_c_temp, mean), y = d_c_temp)) +
+  facet_wrap(.~year, nrow = 1, scales= "free_x") +
+  cowplot::theme_minimal_grid() +
+  labs(x= "City", y="Difference in cold temperatures") +
+  coord_flip() 
+
+# single year variables
+EQI_index %>% 
+  ggplot() +
+  geom_boxplot(aes(x = reorder(city_name, d_c_temp, mean),  y = d_c_temp)) +
+  cowplot::theme_minimal_grid() +
+  #scale_x_discrete(limits=rev) +
+  labs(x= "City", y="Difference in temperature during a cold wave") +
+  coord_flip() 
+
+# muliple year histograms
+EQI_index %>% 
+  #filter(year == "2016") |> 
+  ggplot() +
+  geom_histogram(aes(x = EQI),col="white", bins = 15) +
+  facet_wrap(.~year, nrow = 1) +
+  cowplot::theme_minimal_grid() +
+  labs(x= "EQI Score", y="Count") 
+
+s <- EQI_index |> 
+ group_by(year) |> 
+  na.omit() |> 
+  sf::st_drop_geometry() |> 
+  summarize(min = round(min(d_c_temp), 3),
+            mean = round(mean(d_c_temp), 3),
+            median = round(median(d_c_temp), 3),
+            max = round(max(d_c_temp), 3),
+            sd = round(sd(d_c_temp),3)) 
+
+sf::write_sf(EQI_index, "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/index/EQI_index.shp", append = F)
+
+
+EQI_index |>  
+  filter(year == "2016") |> 
+  filter(city_name == "Vancouver") |> 
+  ggplot() +
+  geom_sf(aes(fill= as.numeric(EQI))) +
+  scale_fill_gradient(low = "white", high = "#375f26") 
+
+
+```
+
+**************** Single 5-year average EQI ****************
+This makes an average EQI from the 5-year window around 2016 (ie., 2014-2018). 
+As NDVI and PM2.5 are the only variables with multiple values, they are averaged together. 
+
+```{r}
+# read in index
+EQI_index <- sf::read_sf("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/index/EQI_index.shp")
+
+colnames(EQI_index) <- c("DAUID", "PRNAME", "CDNAME", "CSDNAME", "DA_area", "cold_temp", "d_c_temp", "no2", "near_pp", "rd_lngt", "num_nds", "hot_temp", "d_h_temp", "m_d_do_sl", "wtr_dist", "wtr_area", "year", "ndvi", "pm25", "city_name", "pop_2016", "nonprivate_dwelling", "privatedwelling", "landarea_sqkm", "popdensity_sqkm", "households_dwellings_q_DA16", "material_resources_q_DA16", "age_labourforce_q_DA16", "immigration_vismin_q_DA16", "households_dwellings_DA16", "material_resources_DA16", "age_labourforce_DA16", "immigration_vismin_DA16", "DAPop_2016", "Province", "no2_q", "near_pp_q", "rd_lngt_q", "d_c_temp_q" , "d_h_temp_q", "m_d_do_sl_q",  "wtr_dist_q", "ndvi_q", "pm25_q", "EQI", "geometry")
+
+
+# average pm2.5 and ndvi between years
+EQI_5year <- EQI_index |> 
+  select(DAUID, PRNAME, CDNAME, CSDNAME, DA_area, cold_temp, d_c_temp, no2, near_pp, rd_lngt, num_nds, hot_temp, d_h_temp, m_d_do_sl, wtr_dist, year, ndvi, pm25, city_name, pop_2016, nonprivate_dwelling, privatedwelling, landarea_sqkm, popdensity_sqkm) |> 
+  group_by(DAUID, city_name) |> 
+  summarise(across(c(DA_area:wtr_dist, ndvi:pm25, pop_2016:popdensity_sqkm), ~ mean(.x, na.rm=T)))
+
+length(unique(EQI_5year$DAUID)) #27956
+
+
+# remove NAs (should be 70 / 63)
+EQI_5year <- EQI_5year |> 
+  drop_na()
+length(unique(EQI_5year$DAUID)) #27955 - lose one, not sure why but ok
+
+#Add population data
+# population <- read.csv("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/DA_2016_population/T1901EN.csv")
+# colnames(population) <- c("DAUID", "prov_eng", "prov_fre", "geocode_prov", "geocode_censusdivision", "geocode_censussubdivision", "pop_2016", "indiansettle", "nonprivate_dwelling", "privatedwelling", "landarea_sqkm", "popdensity_sqkm")
+# population <- population |> 
+#   select(DAUID, pop_2016, nonprivate_dwelling, privatedwelling, landarea_sqkm, popdensity_sqkm)
+# 
+# EQI_5year <- merge(EQI_5year, population, by="DAUID", all.x=T)
+
+# Add CanMarg
+canmarg <- readxl::read_excel("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/CanMarg/CAN-Marg_DA_2016.xlsx", sheet = 5)
+colnames(canmarg) <- c("DAUID", "households_dwellings_q_DA16", "material_resources_q_DA16", "age_labourforce_q_DA16",    "immigration_vismin_q_DA16", "households_dwellings_DA16", "material_resources_DA16", "age_labourforce_DA16", "immigration_vismin_DA16",     "DAPop_2016",  "Province") 
+
+EQI_5year <- merge(EQI_5year, canmarg, by="DAUID", all.x=T)
+
+
+# duplicated DAs
+length(unique(EQI_5year$DAUID)) #27955
+
+# save EQI 5 year
+sf::write_sf(EQI_5year, "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/index/EQI_5year_pop_canmarg.shp", append=F)
+
+
+#### 17 December 2022
+# There was an error when calculating Windsor - the water function was turing the water distance into factors so it was 1-477. This has been fixed in another file. The new, correct "base" file was made from the EQI_5year_pop_canmarg.shp file. Therefore, nothing else needs to change (the Windsor files just replaced the old Windsor files) 
+
+# Everything below this now uses the ne EQI_5year_FINAL.shp but it should have exactly the same number of columns as the old file
+
+
+# read in EQI ---- Need to use EQI_5year_FINAL
+EQI_5year <- sf::read_sf("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/index/EQI_5year_FINAL.shp")
+# if you read this in, then you need to rename the columns because they get shortened
+colnames(EQI_5year) <- c("DAUID", "city_name","DA_area", "cold_temp", "d_c_temp", "no2", "near_pp", "rd_lngt", "num_nds", "hot_temp", "d_h_temp", "m_d_do_sl", "wtr_dist", "ndvi", "pm25", "pop_2016", "nonprivate_dwelling", "privatedwelling", "landarea_sqkm", "popdensity_sqkm", "households_dwellings_q_DA16", "material_resources_q_DA16",  "age_labourforce_q_DA16", "immigration_vismin_q_DA16", "households_dwellings_DA16", "material_resources_DA16","age_labourforce_DA16",     "immigration_vismin_DA16",     "DAPop_2016", "Province", "geometry")
+
+unique(EQI_5year$city_name) # 30 cities
+length(unique(EQI_5year$DAUID)) #27955
+
+# make deciles and index
+
+
+EQI_5year_index <- EQI_5year |> 
+  mutate(no2_q        = ntile(desc(no2), 10),        #1 no2; high values = bad, therefore inverse
+         near_pp_q    = ntile(near_pp, 10),             #2 power plant; high values = good
+         rd_lngt_q    = ntile(desc(rd_lngt), 10),    #3 road lengths; high value = bad, therefore inverse
+         d_c_temp_q    = ntile(d_c_temp, 10),        #4 difference in cold temps; high value = good
+         d_h_temp_q   = ntile(desc(d_h_temp), 10),   #5 difference in hot temps; high value = bad, therefore inverse 
+         m_d_do_sl_q  = ntile(m_d_do_sl, 10),        #6 vitamin D dose; high values = good
+         wtr_dist_q   = ntile(desc(wtr_dist), 10),     #7 distance to water; high values = bad
+         ndvi_q       = ntile(ndvi, 10),             #8 ndvi; high values = good
+         pm25_q       = ntile(desc(pm25), 10),        #9 pm2.5; high values = bad, therefore inverse
+         
+         # calculate CAN-Marg quintiles
+         households_dwellings_q_DAcity = ntile(households_dwellings_DA16, 5),
+         material_resources_q_DAcity = ntile(material_resources_DA16, 5),
+         age_labourforce_q_DAcity    = ntile(age_labourforce_DA16, 5),
+         immigration_vismin_q_DAcity = ntile(immigration_vismin_DA16, 5)
+         ) 
+
+# calculate EQI and CAN-Marg
+EQI_5year_index<- EQI_5year_index |> 
+  mutate(EQI = no2_q + near_pp_q + rd_lngt_q + d_c_temp_q + d_h_temp_q + m_d_do_sl_q + wtr_dist_q + ndvi_q + pm25_q,
+         EQI = EQI*10/9 ,# transform so that the highest value is 100 and not 90
+         canmarg = (households_dwellings_q_DAcity + material_resources_q_DAcity + age_labourforce_q_DAcity + immigration_vismin_q_DAcity)/4
+         )
+# check min and max EQI
+min(as.numeric(EQI_5year_index$EQI), na.rm=T) #21.11111
+max(as.numeric(EQI_5year_index$EQI), na.rm=T) #86.66667
+
+
+# Make GGPLOT presentable
+EQI_5year_index$city_name <- gsub("troisrivieres", "Trois Rivieres", EQI_5year_index$city_name) # fix trois rivieres
+EQI_5year_index$city_name <- gsub("stjohns", "St. John's", EQI_5year_index$city_name) # fix St. Johns
+EQI_5year_index$city_name <- gsub("stcatharines_niagara", "St. Catharines ", EQI_5year_index$city_name) # fix St. Catharines
+EQI_5year_index$city_name <- tools::toTitleCase(EQI_5year_index$city_name)
+
+unique(EQI_5year_index$city_name)
+
+
+# single year variables
+EQI_5year_index %>% 
+  ggplot() +
+ # geom_boxplot(aes(x = reorder(city_name, age_labourforce_DA16, mean),  y = age_labourforce_DA16)) +
+  geom_boxplot(aes(x = forcats::fct_rev(reorder(city_name, city_name)),  y = EQI)) +
+  cowplot::theme_minimal_grid() +
+  #scale_x_discrete(limits=rev) +
+  labs(x= "City", y="Recent Immigration and Visible Minority") +
+  coord_flip() 
+
+# muliple year histograms
+EQI_5year_index %>% 
+  #filter(year == "2016") |> 
+  ggplot() +
+  geom_histogram(aes(x = nohou2_q),col="white", bins = 15) +
+  facet_wrap(.~year, nrow = 1) +
+  cowplot::theme_minimal_grid() +
+  labs(x= "Overall CAN-Marg Score", y="Count") 
+
+# calculate descriptive stats for each variable (have to do individually)
+s <- EQI_5year_index |> 
+  na.omit() |> 
+  sf::st_drop_geometry() |> 
+  summarize(min = round(min(immigration_vismin_q_DAcity), 3),
+            mean = round(mean(immigration_vismin_q_DAcity), 3),
+            median = round(median(immigration_vismin_q_DAcity), 3),
+            max = round(max(immigration_vismin_q_DAcity), 3),
+            sd = round(sd(immigration_vismin_q_DAcity),3)) 
+
+
+EQI_5year_index <- EQI_5year_index |> 
+  mutate(Province = case_when(city_name %in% c("Toronto", "Ottawa", "Hamilton", "Kitchener", "London", "Windsor", "Oshawa","St. Catharines", "Barrie", "Guelph", "Kingston", "Milton") ~ "Ontario",
+        city_name %in% c("Montreal", "Quebec", "Gatineau", "Sherbrooke", "Trois Rivieres", "Chicoutimi") ~ "Quebec",
+        city_name %in% c("Vancouver", "Victoria", "Kelowna", "Abbotsford") ~ "British Columbia",
+        city_name %in% c("Calgary", "Edmonton") ~ "Alberta",
+        city_name %in% c("Winnipeg") ~ "Manitoba",
+        city_name %in% c("Halifax") ~ "Nova Scotia",
+        city_name %in% c("Saskatoon", "Regina") ~ "Saskatchewan",
+        city_name %in% c("St. John's") ~ "Newfoundland & Labrador",
+        city_name %in% c("Moncton") ~ "New Brunswick"
+        
+        ))
+
+sf::write_sf(EQI_5year_index, "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/index/EQI_5year_index_FINAL.shp", append=F)
+
+
+```
+
+
+Publication analyses
+```{r}
+EQI_5year_index <- sf::read_sf("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/index/EQI_5year_index.shp")
+colnames(EQI_5year_index) <- c("DAUID", "city_name", "DA_area", "cold_temp", "d_c_temp", "no2", "near_pp", "rd_lngt", "num_nds", "hot_temp", "d_h_temp", "m_d_do_sl", "wtr_dist", "ndvi", "pm25", "pop_2016", "nonprivate_dwelling", "privatedwelling", "landarea_sqkm", "popdensity_sqkm", "households_dwellings_q_DA16", "material_resources_q_DA16",  "age_labourforce_q_DA16", "immigration_vismin_q_DA16", "households_dwellings_DA16", "material_resources_DA16","age_labourforce_DA16", "immigration_vismin_DA16",  "DAPop_2016", "Province", "no2_q", "near_pp_q", "rd_lngt_q", "d_c_temp_q", "d_h_temp_q", "m_d_do_sl_q", "wtr_dist_q", "ndvi_q", "pm25_q", "households_dwellings_q_DAcity", "material_resources_q_DAcity", "age_labourforce_q_DAcity", "immigration_vismin_q_DAcity", "EQI","canmarg", "geometry")
+
+data <- EQI_5year_index
+
+
+stats <- data |> 
+  sf::st_drop_geometry() |> 
+  group_by(city_name) |> 
+  summarise(
+    pop = sum(as.numeric(pop_2016)),
+    min = min(as.numeric(EQI)),
+            mean = mean(as.numeric(EQI)),
+            median = median(as.numeric(EQI)),
+            max = max(as.numeric(EQI))
+            )
+
+data |> 
+  filter(city_name == "Montreal") |> 
+  ggplot() +
+  geom_histogram(aes(x=EQI)) +
+  cowplot::theme_minimal_grid() +
+  labs(title = "Montreal")
+
+
+table(EQI_5year_index$pop_2016)
+
+# reclassify 
+data <- data |> 
+  mutate(EQI_class = case_when(EQI < 20 ~ c("0-20"),
+                               EQI>= 20 & EQI<30 ~ c("20-30"),
+                               EQI>= 30 & EQI<40 ~ c("30-40"),
+                               EQI>= 40 & EQI<50 ~ c("40-50"),
+                               EQI>= 50 & EQI<60 ~ c("50-60"),
+                               EQI>= 60 & EQI<70 ~ c("60-70"),
+                               EQI>= 70 & EQI<80 ~ c("70-80"),
+                               EQI>= 80 & EQI<90 ~ c("80-90"),
+                               EQI>= 90 & EQI<100 ~ c("90-100")
+                               ))
+
+xx <- data |> 
+  filter(EQI_class == "80-90" | EQI_class == "90-1000") |> 
+  mutate(AREA = sf::st_area(geometry)/1000000)
+sum(xx$AREA)
+
+
+test <- data |> 
+  sf::st_drop_geometry() |> 
+  select(DAUID, DA_area, d_c_temp, no2, near_pp, rd_lngt, d_h_temp, m_d_do_sl, wtr_dist, city_name, ndvi, pm25, pop_2016, EQI, EQI_class) 
+
+aa <- test |> 
+  group_by(EQI_class) |> 
+  summarize(area = sum(DA_area)/1000)
+
+nas <- test |> 
+  filter(is.na(EQI))
+
+test2 <- test |> 
+  group_by(EQI_class) |> 
+  summarise(mean = round(mean(as.numeric(d_h_temp)), 2),
+            min = round(min(as.numeric(d_h_temp)), 2),
+            max = round(max(as.numeric(d_h_temp)), 2),
+            num_DA = length(unique(DAUID)),
+            pop = sum(pop_2016))
+# for kilos
+test2 <- test |> 
+  group_by(EQI_class) |> 
+  summarise(mean = round(mean(as.numeric(rd_lngt)/1000), 2),
+            min = round(min(as.numeric(rd_lngt)/1000), 2),
+            max = round(max(as.numeric(rd_lngt)/1000), 2),
+            num_DA = length(unique(DAUID)),
+            pop = sum(pop_2016))
+
+
+x <- data |> 
+  group_by(city_name) |> 
+  mutate(city_pop = sum(pop_2016, na.rm=T))
+
+# Here to plot if needed
+x |> 
+  ggplot() +
+  geom_boxplot(aes(x = reorder(city_name, city_pop, mean),  y = as.numeric(d_h_temp))) +
+  #geom_boxplot(aes(x = forcats::fct_rev(reorder(city_name, city_pop, mean)),  y = as.numeric(EQI))) +
+  cowplot::theme_minimal_grid() +
+  #scale_x_discrete(limits=rev) +
+  labs(x= "City", y="EQI") +
+  coord_flip() 
+
+
+
+x <- EQI_5year_index[rowSums(is.na(EQI_5year_index)) >0,]
+
+df <- data |> 
+  select(DA_area, popdensity_sqkm, d_c_temp, no2, near_pp, rd_lngt, d_h_temp, m_d_do_sl, wtr_dist, ndvi, pm25, pop_2016, EQI) |> 
+  mutate(EQI = as.numeric(EQI),
+         `DA area` = as.numeric(DA_area),
+         `Pop. den. (per sq km)` = as.numeric(popdensity_sqkm),
+          Population = as.numeric(pop_2016),
+         `PM2.5` = as.numeric(pm25),
+          NO2 = as.numeric(no2),
+          NDVI = as.numeric(ndvi),
+          `Dist. to water` = as.numeric(wtr_dist),
+         `Highway length` = as.numeric(rd_lngt),
+         `Dist. to power plant` = as.numeric(near_pp),
+          `Vitamin D` = as.numeric(m_d_do_sl),
+          `Heat wave temp.` = as.numeric(d_h_temp),
+         `Cold wave temp.` = as.numeric(d_c_temp)
+         ) |> 
+  sf::st_drop_geometry() |> 
+  select(EQI, `DA area`, Population, `Pop. den. (per sq km)`,`PM2.5`, NO2, NDVI, `Dist. to water`,`Highway length`, `Dist. to power plant`, `Vitamin D`, `Heat wave temp.`, `Cold wave temp.`)
+
+
+# correlations
+col2 <- colorRampPalette(c("#67001F", "#B2182B", "#D6604D", "#F4A582", "#FDDBC7",
+        "#FFFFFF", "#D1E5F0", "#92C5DE", "#4393C3", "#2166AC", "#053061")) 
+corrplot::corrplot(cor(df, method = "spearman"), 
+                   method = 'color', 
+                   type = "upper", 
+                   diag = F, 
+                   outline = T, 
+                   order = "original", 
+                   addCoef.col = 'black', 
+                   tl.col = "black", 
+                   tl.ps="n",
+                   col=colorRampPalette(c("#2166ac","#2166ac","#2166ac","#2166ac","#2166ac",
+                                          "#67a9cf","#67a9cf",
+                                          "#d1e5f0","#d1e5f0","#d1e5f0",
+                                          "#fddbc7", "#fddbc7", "#fddbc7",
+                                          "#ef8a62","#ef8a62",
+                                          "#b2182b","#b2182b","#b2182b","#b2182b","#b2182b"))(21))
+
+
+res1 <- corrplot::cor.mtest(df, conf.level = .95, method = "spearman")
+
+corrplot::corrplot(cor(df, method = "spearman"), method = 'color', type = "upper", diag = F, outline = T, order = "original", tl.col = "black", p.mat = res1$p, insig = "p-value", tl.pos = "n", sig.level = 0.05)
+
+
+# summarize by city
+y <- data |> 
+  sf::st_drop_geometry() |> 
+  group_by(city_name) |> 
+  summarize(num_da = n_distinct(DAUID),
+            sum_pop = sum(pop_2016))
+
+
+
+# sensitivity analyses
+# How do area and population density change EQI values
+sensitivity <- data |> 
+  sf::st_drop_geometry() |> 
+  group_by(city_name) |> 
+  mutate(sum_pop = sum(pop_2016),
+         sum_den = mean(popdensity_sqkm)) |> 
+  ungroup() |> 
+  mutate(city_pop_cat = case_when(sum_pop < 200000 ~ c("1"),
+                               sum_pop>= 200000 & sum_pop<500000 ~ c("2"),
+                               sum_pop>= 500000 & sum_pop<1000000 ~ c("3"),
+                               sum_pop>= 1000000 ~ c("4")),
+         city_density_cat = case_when(sum_den < 3000 ~ c("1"),
+                               sum_den>= 3000 & sum_den<4000 ~ c("2"),
+                               sum_den>= 4000 & sum_den<5000 ~ c("3"),
+                               sum_den>= 5000 ~ c("4"))) 
+
+# ranges for each population category
+test2 <- sensitivity |> 
+  group_by(city_pop_cat) |> 
+  summarise(mean = round(mean(as.numeric(sum_pop), 2)),
+            min = round(min(as.numeric(sum_pop), 2)),
+            max = round(max(as.numeric(sum_pop), 2)),
+            num_DA = length(unique(DAUID)))
+
+
+# plot to make sure the deciles worked
+sensitivity |> ggplot() +
+  geom_histogram(aes(x=city_pop_cat), stat = "count")
+
+# are there differences between different sized cities?
+anova_population <- aov(EQI ~ as.factor(city_pop_cat),  data = sensitivity)
+summary(anova_population)
+
+report::report(anova_population)
+
+# yes there are differences
+sensitivity %>% 
+  ggplot() +
+  geom_boxplot(aes(x = as.factor(city_pop_cat),  y = EQI)) +
+  labs(x= "City Population", y="EQI") +
+  cowplot::theme_minimal_grid()
+
+tukey_population <- TukeyHSD(anova_population)
+tukey_population
+#            diff        lwr        upr     p adj
+# 2-1   0.4921793  -0.112399   1.096758 0.1558412
+# 3-1  -2.4264194  -3.029347  -1.823492 0.0000000
+# 4-1 -10.2435909 -10.772434  -9.714748 0.0000000
+# 3-2  -2.9185987  -3.402822  -2.434376 0.0000000
+# 4-2 -10.7357702 -11.123874 -10.347666 0.0000000
+# 4-3  -7.8171715  -8.202699  -7.431644 0.0000000
+
+# groups are different except for the smallest cities
+
+
+# are there differences with population density
+anova_density <- aov(EQI ~ as.factor(city_density_cat),  data = sensitivity)
+summary(anova_density)
+
+# yes there are differences
+sensitivity %>% 
+  ggplot() +
+  geom_boxplot(aes(x = as.factor(city_density_cat),  y = EQI)) +
+  labs(x= "City Density", y="EQI") +
+  cowplot::theme_minimal_grid()
+
+tukey_population <- TukeyHSD(anova_population)
+tukey_population
+#           diff        lwr        upr     p adj
+# 2-1   0.4921793  -0.112399   1.096758 0.1558412
+# 3-1  -2.4264194  -3.029347  -1.823492 0.0000000
+# 4-1 -10.2435909 -10.772434  -9.714748 0.0000000
+# 3-2  -2.9185987  -3.402822  -2.434376 0.0000000
+# 4-2 -10.7357702 -11.123874 -10.347666 0.0000000
+# 4-3  -7.8171715  -8.202699  -7.431644 0.0000000
+
+
+
+# Are there diffences in city size and DA size/ populaiton
+anova_dasize <- aov(EQI ~ as.factor(Province),  data = sensitivity)
+summary(anova_dasize)
+
+# yes there are differences
+sensitivity %>% 
+  ggplot() +
+  geom_boxplot(aes(x = as.factor(Province),  y = EQI)) +
+  labs(x= "Province", y="EQI") +
+  cowplot::theme_minimal_grid()
+
+tukey_population <- TukeyHSD(anova_dasize)
+tukey_population
+
+
+rm(data1)
+```
+
+
+
+Factor Analysis
+-- Not appropriate for these data
+```{r}
+df <- df |> 
+  drop_na(df)
+
+# correlation between variables
+corrplot::corrplot(cor(df, method = "spearman"), method = 'number', type = "upper", diag = F, outline = T, order = "original", addCoef.col = 'black', tl.col = "black")
+
+
+# KMO
+psych::KMO(df)
+# Kaiser-Meyer-Olkin factor adequacy
+# Call: psych::KMO(r = df)
+# Overall MSA =  0.46
+# MSA for each item = 
+#                   EQI               DA area            Population Pop. den. (per sq km)                 PM2.5                   NO2 
+#                  0.41                  0.59                  0.73                  0.74                  0.41                  0.59 
+#                  NDVI        Dist. to water        Highway length  Dist. to power plant             Vitamin D       Heat wave temp. 
+#                  0.70                  0.40                  0.49                  0.10                  0.23                  0.44 
+#       Cold wave temp. 
+#                  0.24 
+```
+
+
+
+
+Weighting
+
+```{r}
+# read in EQI
+EQI_5year <- sf::read_sf("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/index/EQI_5year_pop_canmarg.shp")
+# if you read this in, then you need to rename the columns because they get shortened
+colnames(EQI_5year) <- c("DAUID", "city_name","DA_area", "cold_temp", "d_c_temp", "no2", "near_pp", "rd_lngt", "num_nds", "hot_temp", "d_h_temp", "m_d_do_sl", "wtr_dist", "ndvi", "pm25", "pop_2016", "nonprivate_dwelling", "privatedwelling", "landarea_sqkm", "popdensity_sqkm", "households_dwellings_q_DA16", "material_resources_q_DA16",  "age_labourforce_q_DA16", "immigration_vismin_q_DA16", "households_dwellings_DA16", "material_resources_DA16","age_labourforce_DA16",     "immigration_vismin_DA16",     "DAPop_2016", "Province", "geometry")
+
+unique(EQI_5year$city_name) # 30 cities
+length(unique(EQI_5year$DAUID)) #27955
+
+# make deciles and index
+
+
+EQI_5year_index <- EQI_5year |> 
+  mutate(
+         no2_q        = ntile(desc(no2), 10),        #1 no2; high values = bad, therefore inverse
+         near_pp_q    = ntile(near_pp, 10),             #2 power plant; high values = good
+         rd_lngt_q    = ntile(desc(rd_lngt), 10),    #3 road lengths; high value = bad, therefore inverse
+         d_c_temp_q    = ntile(d_c_temp, 10),        #4 difference in cold temps; high value = good
+         d_h_temp_q   = ntile(desc(d_h_temp), 10),   #5 difference in hot temps; high value = bad, therefore inverse 
+         m_d_do_sl_q  = ntile(m_d_do_sl, 10),        #6 vitamin D dose; high values = good
+         wtr_dist_q   = ntile(desc(wtr_dist), 10),     #7 distance to water; high values = bad
+         ndvi_q       = ntile(ndvi, 10),             #8 ndvi; high values = good
+         pm25_q       = ntile(desc(pm25), 10),        #9 pm2.5; high values = bad, therefore inverse
+         
+         # min-max transformation
+         no2_mm        = 1- (no2 - min(no2))/(max(no2)-min(no2)),           # high=bad
+         near_pp_mm    = (near_pp-min(near_pp))/(max(near_pp)-min(near_pp)),             #2 power plant; high values = good
+         rd_lngt_mm    = 1- (rd_lngt-min(rd_lngt))/(max(rd_lngt)-min(rd_lngt)),    #3 road lengths; high value = bad, therefore inverse
+         d_c_temp_mm    = (d_c_temp-min(d_c_temp))/(max(d_c_temp)-min(d_c_temp)),        #4 difference in cold temps; high value = good
+         d_h_temp_mm   = 1- (d_h_temp-min(d_h_temp))/(max(d_h_temp)-min(d_h_temp)),    #5 difference in hot temps; high value = bad, therefore inverse 
+         m_d_do_sl_mm  = (m_d_do_sl-min(m_d_do_sl))/(max(m_d_do_sl)-min(m_d_do_sl)),        #6 vitamin D dose; high values = good
+         wtr_dist_mm   = 1- (wtr_dist-min(wtr_dist))/(max(wtr_dist)-min(wtr_dist)),     #7 distance to water; high values = bad
+         ndvi_mm       = (ndvi-min(ndvi))/(max(ndvi)-min(ndvi)),             #8 ndvi; high values = good
+         pm25_mm       = 1- (pm25-min(pm25))/(max(pm25)-min(pm25)),        #9 pm2.5; high values = bad, therefore inverse
+        
+         EQI_mm = no2_mm + near_pp_mm + rd_lngt_mm + d_c_temp_mm + d_h_temp_mm + m_d_do_sl_mm + wtr_dist_mm + ndvi_mm + pm25_mm
+         ) 
+hist(EQI_5year_index$EQI_mm)
+mm_cor <- EQI_5year_index |> 
+  sf::st_drop_geometry() |> 
+  select(no2_mm:EQI_mm)
+
+# correlation between variables for the min-max normalization method
+corrplot::corrplot(cor(mm_cor, method = "spearman"), 
+                   method = 'color', 
+                   type = "upper", 
+                   diag = F, 
+                   outline = T, 
+                   order = "original", 
+                   addCoef.col = 'black', 
+                   tl.col = "black", 
+                   tl.ps="n",
+                   col=colorRampPalette(c("#2166ac","#2166ac","#2166ac","#2166ac","#2166ac",
+                                          "#67a9cf","#67a9cf",
+                                          "#d1e5f0","#d1e5f0","#d1e5f0",
+                                          "#fddbc7", "#fddbc7", "#fddbc7",
+                                          "#ef8a62","#ef8a62",
+                                          "#b2182b","#b2182b","#b2182b","#b2182b","#b2182b"))(21))
+
+d# calculate EQI and CAN-Marg
+EQI_5year_index<- EQI_5year_index |> 
+  mutate(
+### additive
+    EQI_add_original = (no2_q + near_pp_q + rd_lngt_q + d_c_temp_q + d_h_temp_q + m_d_do_sl_q + wtr_dist_q + ndvi_q +  pm25_q),
+    EQI_add_original = EQI_add_original*100/90,
+
+   # correlation method
+   EQI_add_weight_cor = (0.19*no2_q) + (0.05*near_pp_q) + (0.05*rd_lngt_q) + (0.003*d_c_temp_q) + (0.14*d_h_temp_q) + (0.08*m_d_do_sl_q) +     (0.15*wtr_dist_q) + (0.22*ndvi_q) + (0.11*pm25_q),
+   EQI_add_weight_cor = EQI_add_weight_cor*100/9.93,
+
+    # equal weight domain
+    EQI_add_weight_dom = (0.1*no2_q) + (0.1*near_pp_q) + (0.1*rd_lngt_q) + (0.1*d_c_temp_q) + (0.1*d_h_temp_q) + (0.2*m_d_do_sl_q) + (0.1*wtr_dist_q) + (0.1*ndvi_q) + (0.1*pm25_q),
+    EQI_add_weight_dom = EQI_add_weight_dom*100/10,
+         
+         
+### geometric
+         
+   EQI_geom_original = (no2_q^(1/9) * near_pp_q^(1/9) * rd_lngt_q^(1/9) * d_c_temp_q^(1/9) * d_h_temp_q^(1/9) * m_d_do_sl_q^(1/9) *     
+   wtr_dist_q^(1/9) * ndvi_q^(1/9) * pm25_q^(1/9)),
+   EQI_geom_original = EQI_geom_original*100/m,
+
+   # correlation method
+   EQI_geom_weight_cor = (no2_q^(w*0.19)) * (near_pp_q^(w*0.05)) * (rd_lngt_q^(w*0.05)) * (d_c_temp_q^(w*0.003)) * (d_h_temp_q^(w*0.14)) * (m_d_do_sl_q^(w*0.08)) *  (wtr_dist_q^(w*0.15)) * (ndvi_q^(w*0.22)) * (pm25_q^(w*0.11)),
+   EQI_geom_weight_cor = EQI_geom_weight_cor*100/mm,
+
+ # equal dom method
+   EQI_geom_weight_dom = (no2_q^(w*0.1)) * (near_pp_q^(w*0.1)) * (rd_lngt_q^(w*0.1)) * (d_c_temp_q^(w*0.1)) * (d_h_temp_q^(w*0.1)) * (m_d_do_sl_q^(w*0.2)) *  (wtr_dist_q^(w*0.1)) * (ndvi_q^(w*0.1)) * (pm25_q^(w*0.1)),
+   EQI_geom_weight_dom = EQI_geom_weight_dom*100/mmm,
+
+
+#### Min-Max normalization
+### additive
+    EQI_mm_add_original = (no2_mm + near_pp_mm + rd_lngt_mm + d_c_temp_mm + d_h_temp_mm + m_d_do_sl_mm + wtr_dist_mm + ndvi_mm +  pm25_mm),
+    EQI_mm_add_original = EQI_mm_add_original*100/9,
+
+   # correlation method
+   EQI_mm_add_weight_cor = (0.178*no2_mm) + (0.083*near_pp_mm) + (0.016*rd_lngt_mm) + (0.041*d_c_temp_mm) + (0.127*d_h_temp_mm) + (0.124*m_d_do_sl_mm) +     (0.016*wtr_dist_mm) + (0.226*ndvi_mm) + (0.057*pm25_mm),
+   EQI_mm_add_weight_cor = EQI_mm_add_weight_cor*100/0.868,
+
+    # equal weight domain
+    EQI_mm_add_weight_dom = (0.1*no2_mm) + (0.1*near_pp_mm) + (0.1*rd_lngt_mm) + (0.1*d_c_temp_mm) + (0.1*d_h_temp_mm) + (0.2*m_d_do_sl_mm) + (0.1*wtr_dist_mm) + (0.1*ndvi_mm) + (0.1*pm25_mm),
+    EQI_mm_add_weight_dom = EQI_mm_add_weight_dom*100/1,
+         
+         
+### geometric
+         
+   EQI_mm_geom_original = (no2_mm^(1/9) * near_pp_mm^(1/9) * rd_lngt_mm^(1/9) * d_c_temp_mm^(1/9) * d_h_temp_mm^(1/9) * m_d_do_sl_mm^(1/9) *     wtr_dist_mm^(1/9) * ndvi_mm^(1/9) * pm25_mm^(1/9)),
+   EQI_mm_geom_original = EQI_mm_geom_original*100/d,
+
+   # correlation method
+   EQI_mm_geom_weight_cor = (no2_mm^(w*0.178)) * (near_pp_mm^(w*0.083)) * (rd_lngt_mm^(w*0.016)) * (d_c_temp_mm^(w*0.041)) * (d_h_temp_mm^(w*0.127)) * (m_d_do_sl_mm^(w*0.124)) *  (wtr_dist_mm^(w*0.016)) * (ndvi_mm^(w*0.226)) * (pm25_mm^(w*0.057)),
+   EQI_mm_geom_weight_cor = EQI_mm_geom_weight_cor*100/dd,
+
+ # equal dom method
+   EQI_mm_geom_weight_dom = (no2_mm^(w*0.1)) * (near_pp_mm^(w*0.1)) * (rd_lngt_mm^(w*0.1)) * (d_c_temp_mm^(w*0.1)) * (d_h_temp_mm^(w*0.1)) * (m_d_do_sl_mm^(w*0.2)) *  (wtr_dist_mm^(w*0.1)) * (ndvi_mm^(w*0.1)) * (pm25_mm^(w*0.1)),
+   EQI_mm_geom_weight_dom = EQI_mm_geom_weight_dom*100/ddd
+         )
+
+
+# denominator for geometric 
+w <- (1/9)
+m <- (10^w) * (10^w)* (10^w) * (10^w) * (10^w) * (10^w) * (10^w) * (10^w) * (10^w)
+mm <- (10^(w*0.19)) * (10^(w*0.05)) * (10^(w*0.05)) * (10^(w*0.003)) * (10^(w*0.14)) * (10^(w*0.08)) * (10^(w*0.15)) * (10^(w*0.22)) * (10^(w*0.11))
+mmm <- (10^(w*0.1)) * (10^(w*0.1)) * (10^(w*0.1)) * (10^(w*0.1)) * (10^(w*0.1)) * (10^(w*0.2)) * (10^(w*0.1)) * (10^(w*0.1)) * (10^(w*0.1))
+
+d <- (1^w) * (1^w)* (1^w) * (1^w) * (1^w) * (1^w) * (1^w) * (1^w) * (1^w)
+dd <- (1^(w*0.057)) * (1^(w*0.178)) * (1^(w*0.226)) * (1^(w*0.016)) * (1^(w*0.016)) * (1^(w*0.083)) * (1^(w*0.124)) * (1^(w*0.127)) * (1^(w*0.041))
+ddd <- (1^(w*0.1)) * (1^(w*0.1)) * (1^(w*0.1)) * (1^(w*0.1)) * (1^(w*0.1)) * (1^(w*0.2)) * (1^(w*0.1)) * (1^(w*0.1)) * (1^(w*0.1))
+
+# check min and max EQI
+min(as.numeric(EQI_5year_index$EQI_add_original), na.rm=T) #21.11
+max(as.numeric(EQI_5year_index$EQI_add_original), na.rm=T) # 86.66
+
+min(as.numeric(EQI_5year_index$EQI_mm_geom_weight_dom), na.rm=T) #24.358
+max(as.numeric(EQI_5year_index$EQI_mm_geom_weight_dom), na.rm=T) # 100
+
+
+
+# Make GGPLOT presentable
+EQI_5year_index$city_name <- gsub("troisrivieres", "Trois Rivieres", EQI_5year_index$city_name) # fix trois rivieres
+EQI_5year_index$city_name <- gsub("stjohns", "St. John's", EQI_5year_index$city_name) # fix St. Johns
+EQI_5year_index$city_name <- gsub("stcatharines_niagara", "St. Catharine's ", EQI_5year_index$city_name) # fix St. Catharines
+EQI_5year_index$city_name <- tools::toTitleCase(EQI_5year_index$city_name)
+
+unique(EQI_5year_index$city_name)
+
+
+EQI_5year_index |> 
+  group_by(city_name) |> 
+  mutate(city_pop = sum(pop_2016, na.rm=T)) |> 
+  ungroup() |> 
+  ggplot() +
+  geom_boxplot(aes(x = forcats::fct_rev(reorder(city_name, EQI_mm_geom_weight_dom, mean)),  y = as.numeric(EQI_mm_geom_weight_dom))) +
+  #geom_boxplot(aes(x = forcats::fct_rev(reorder(city_name, EQI_original, mean)),  y = as.numeric(EQI_original))) +
+  cowplot::theme_minimal_grid() +
+  #scale_x_discrete(limits=rev) +
+  labs(x= "City", y="Weighted EQI") +
+  coord_flip() 
+
+stats <- EQI_5year_index |> 
+  sf::st_drop_geometry() |> 
+  group_by(city_name) |> 
+  summarise(pop = sum(pop_2016),
+            EQI_add_original = mean(EQI_add_original),
+            EQI_add_weight_cor = mean(EQI_add_weight_cor),
+            EQI_add_weight_dom = mean(EQI_add_weight_dom),
+            EQI_geom_original = mean(EQI_geom_original),
+            EQI_geom_weight_cor = mean(EQI_geom_weight_cor),
+            EQI_geom_weight_dom = mean(EQI_geom_weight_dom),
+            
+            EQI_mm_add_original = mean(EQI_mm_add_original),
+            EQI_mm_add_weight_cor = mean(EQI_mm_add_weight_cor),
+            EQI_mm_add_weight_dom = mean(EQI_mm_add_weight_dom),
+            EQI_mm_geom_original = mean(EQI_mm_geom_original),
+            EQI_mm_geom_weight_cor = mean(EQI_mm_geom_weight_cor),
+            EQI_mm_geom_weight_dom = mean(EQI_mm_geom_weight_dom)
+            )
+
+
+weights2 <- stats |>
+  pivot_longer(cols = c(3:8), names_to = "scheme",
+               values_to = "EQI")
+weights2 |> 
+  group_by(city_name) |> 
+  ggplot() + 
+  geom_col(aes(x=EQI, y = city_name, fill=scheme), position = "dodge") +
+  cowplot::theme_minimal_grid() +
+  facet_wrap(.~ scheme)
+
+
+## plots of change of each city from excel sheet
+change_plot <- readxl::read_excel("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Publications/correlation_plots.xlsx", sheet=4)
+change_plot |> 
+  ggplot(aes(x = reorder(city, quin_add_uw, mean), y=quin_add_uw)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = quin_add_uw - ebar, 
+                    ymax = quin_add_uw + ebar), 
+                size = 0.5,
+                width=1,
+                position=position_dodge(0.00001)) +
+  cowplot::theme_minimal_grid() +
+  theme(axis.text.x = element_text(hjust=1)) +
+  labs(x = "City", y="Rank") +
+   scale_y_continuous(breaks=seq(0,30,1)) +
+  coord_flip()
+ 
+  
+  
+
+```
+
+

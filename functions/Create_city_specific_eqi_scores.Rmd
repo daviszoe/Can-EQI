@@ -1,0 +1,417 @@
+---
+title: "R Notebook"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+function: calculate_eqi_by_city
+```{r}
+calculate_eqi_by_city <- function(eqi, city) {
+  
+  # select only for one city
+  file <- eqi |> 
+    filter(city_name == city)
+  
+  # how many DAs? should be length of file
+  print(paste0("there are ", length(unique(file$DAUID)), " DAs")) 
+  
+  print("starting decile calculaton")
+  # make deciles and index
+EQI_index <- file |> 
+  #group_by(year) |> 
+  mutate(no2_q        = ntile(desc(no2), 10),        #1 no2; high values = bad, therefore inverse
+         near_pp_q = ntile(near_pp, 10),             #2 power plant; high values = good
+         rd_lngt_q    = ntile(desc(rd_lngt), 10),    #3 road lengths; high value = bad, therefore inverse
+         d_c_temp_q    = ntile(d_c_temp, 10),        #4 difference in cold temps; high value = good
+         d_h_temp_q   = ntile(desc(d_h_temp), 10),   #5 difference in hot temps; high value = bad, therefore inverse 
+         m_d_do_sl_q  = ntile(m_d_do_sl, 10),        #6 vitamin D dose; high values = good
+         wtr_dist_q = ntile(desc(wtr_dist), 10),     #7 distance to water; high values = bad
+         ndvi_q       = ntile(ndvi, 10),             #8 ndvi; high values = good
+         pm25_q       = ntile(desc(pm25), 10)        #9 pm2.5; high values = bad, therefore inverse
+         ) 
+
+print("starting transformation")
+EQI_index<- EQI_index |> 
+  #group_by(year) |> 
+  mutate(EQI = no2_q + near_pp_q + rd_lngt_q + d_c_temp_q + d_h_temp_q + m_d_do_sl_q + wtr_dist_q + ndvi_q + pm25_q,
+         EQI = EQI*10/9 # transform so that the highest value is 100 and not 90
+         )
+# check min and max EQI
+print(paste0("min eqi is ", min(as.numeric(EQI_index$EQI), na.rm=T))) 
+print(paste0("max eqi is ", max(as.numeric(EQI_index$EQI), na.rm=T))) 
+
+return(EQI_index)
+  
+}
+
+```
+
+function: find_morans_gi
+```{r}
+find_morans_gi <- function(name_of_city, metric) { 
+
+     # read in data
+  city <- city_specific_eqi |> 
+  filter(city_name == name_of_city) 
+  
+  # how many NAs?
+  print("how many NAs?")
+  print(sum(is.na(city$EQI)))
+
+  # identify neighbors - not including self
+  print("identifying neighbours")
+  nb <- spdep::poly2nb(city, queen=TRUE)
+  
+  print("starting Moran's I")
+  # assign weights to each polygon
+  lw <- spdep::nb2listw(nb, style="W", zero.policy=TRUE)
+  
+  # identify lags - doesn't need to be computed, but can be used to visualize
+  Inc.lag <- spdep::lag.listw(lw, city$EQI, zero.policy = TRUE)
+
+  # moran plot
+ # spdep::moran.plot(city$EQI, listw=lw, xlab="EQI", ylab="Standardized Lagged EQI",
+  #main=c("Moran Scatterplot for EQI", "in", paste0(name_of_city)) )
+
+
+  # Moran's I
+  print("morans")
+  print(spdep::moran.test(city$EQI,lw, zero.policy = T))
+  
+  # monte carlo morans
+  print("monte carlo")
+  print(spdep::moran.mc(city$EQI, lw, nsim=599, zero.policy = T))
+  
+  
+  #Gi Star
+  print("starting Gi star")
+  
+  # identify self neighbours
+  print("identifying self neighbours")
+  city.self <- spdep::include.self(nb)
+    
+  # weights with self
+  print("identify self neighbours")
+  city.w.self <- spdep::nb2listw(city.self, style="W")
+
+  # local gi star
+  print("calcualte Local Gi star")
+  localgstar <- spdep::localG(city$EQI,city.w.self)
+  
+  
+  # copy it over
+  city_map <- city
+  
+  city_map <- city_map %>%
+                dplyr::mutate(localgstar = as.numeric(localgstar))
+  
+  return(city_map)
+  
+  }
+```
+
+
+Calculate EQI for each city
+```{r}
+# Get base data
+EQI_5year_index <- sf::read_sf("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/index/EQI_5year_index_FINAL.shp")
+colnames(EQI_5year_index) <- c("DAUID", "city_name", "DA_area", "cold_temp", "d_c_temp", "no2", "near_pp", "rd_lngt", "num_nds", "hot_temp", "d_h_temp", "m_d_do_sl", "wtr_dist", "ndvi", "pm25", "pop_2016", "nonprivate_dwelling", "privatedwelling", "landarea_sqkm", "popdensity_sqkm", "households_dwellings_q_DA16", "material_resources_q_DA16",  "age_labourforce_q_DA16", "immigration_vismin_q_DA16", "households_dwellings_DA16", "material_resources_DA16","age_labourforce_DA16", "immigration_vismin_DA16",  "DAPop_2016", "Province", "no2_q", "near_pp_q", "rd_lngt_q", "d_c_temp_q", "d_h_temp_q", "m_d_do_sl_q", "wtr_dist_q", "ndvi_q", "pm25_q", "households_dwellings_q_DAcity", "material_resources_q_DAcity", "age_labourforce_q_DAcity", "immigration_vismin_q_DAcity", "EQI","canmarg", "geometry")
+
+EQI_5year_index <- EQI_5year_index |> 
+  select("DAUID", "city_name", "DA_area", "cold_temp", "d_c_temp", "no2", "near_pp", "rd_lngt", "num_nds", "hot_temp", "d_h_temp", "m_d_do_sl", "wtr_dist", "ndvi", "pm25", "pop_2016", "geometry")
+
+
+length(unique(EQI_5year_index$DAUID)) #27955 DAs included
+
+# create list of cities
+city_list <- unique(EQI_5year_index$city_name)
+
+# loop for calculating city list for each one
+for (x in seq_along(city_list)) {
+  
+  # calculate eqi
+city <- calculate_eqi_by_city(eqi = EQI_5year_index, 
+                              city = city_list[x])
+# save for combination later
+sf::write_sf(city, paste0("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/city_specific_eqi_scores/",city_list[x], ".shp"))
+
+# give update
+print(paste0("on city ", x, " of ", length(city_list)))
+  
+}
+
+# combine into single file
+# combine into single EQI file 
+file_list <- list.files("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/city_specific_eqi_scores", pattern = ".shp", full.names = T)
+
+# combine
+x <- lapply(file_list,  sf::read_sf)
+city_specific_eqi <- do.call(rbind, x)
+
+sf::write_sf(city_specific_eqi,"/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/city_specific_eqi_scores/combinedcity_specific_eqi_sores_FINAL.shp" )
+
+```
+
+
+For Deliverable - descriptive
+```{r}
+# watch out! names changes when saved :(
+city_specific_eqi <- sf::read_sf("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/city_specific_eqi_scores/combinedcity_specific_eqi_sores.shp")
+colnames(city_specific_eqi) <- c("DAUID", "city_name", "DA_area","cold_temp", "d_c_temp", "no2", "near_pp", "rd_lngt", "num_nds", "hot_temp", "d_h_temp", "m_d_do_sl", "wtr_dist", "ndvi", "pm25", "pop_2016", "no2_q", "near_pp_q", "rd_lngt_q", "d_c_temp_q", "d_h_temp_q", "m_d_do_sl_q", "wtr_dist_q", "ndvi_q", "pm25_q", "EQI", "geometry" )
+
+
+# Make GGPLOT presentable
+city_specific_eqi$city_name <- gsub("troisrivieres", "Trois Rivieres", city_specific_eqi$city_name) # fix trois rivieres
+city_specific_eqi$city_name <- gsub("stjohns", "St. John's", city_specific_eqi$city_name) # fix St. Johns
+city_specific_eqi$city_name <- gsub("stcatharines_niagara", "St. Catharines ", city_specific_eqi$city_name) # fix St. Catharines
+city_specific_eqi$city_name <- tools::toTitleCase(city_specific_eqi$city_name)
+
+
+
+
+city_specific_eqi |> 
+  ggplot() +
+  geom_boxplot(aes(x = city_nm, y= as.numeric(EQI))) +
+  cowplot::theme_minimal_grid() +
+  labs(x= "City", y="EQI")+
+  scale_x_discrete(limits=rev) +
+  coord_flip() 
+
+x <- city_specific_eqi |> 
+  sf::st_drop_geometry() |> 
+  group_by(city_name) |> 
+  summarize(avg_EQI = mean(EQI))
+
+
+city_specific_eqi |> 
+  filter(city_name == "Toronto") |> 
+    ggplot() +
+    geom_sf(aes(fill= as.numeric(EQI))) +
+    scale_fill_gradientn(colors = terrain.colors(20))
+
+
+
+# reclassify to find ranges of each indictor for different groups of EQI scores
+data <- city_specific_eqi |> 
+  mutate(EQI_class = case_when(EQI < 20 ~ c("0-20"),
+                               EQI>= 20 & EQI<30 ~ c("20-30"),
+                               EQI>= 30 & EQI<40 ~ c("30-40"),
+                               EQI>= 40 & EQI<50 ~ c("40-50"),
+                               EQI>= 50 & EQI<60 ~ c("50-60"),
+                               EQI>= 60 & EQI<70 ~ c("60-70"),
+                               EQI>= 70 & EQI<80 ~ c("70-80"),
+                               EQI>= 80 & EQI<90 ~ c("80-90"),
+                               EQI>= 90 & EQI<100 ~ c("90-100")
+                               ))
+
+test <- data |> 
+  sf::st_drop_geometry() |> 
+  select(DAUID, DA_area, d_c_temp, no2, near_pp, rd_lngt, d_h_temp, m_d_do_sl, wtr_dist, city_name, ndvi, pm25, pop_2016, EQI, EQI_class) 
+
+nas <- test |> 
+  filter(is.na(EQI))
+
+test2 <- test |> 
+  group_by(EQI_class) |> 
+  summarise(mean = round(mean(as.numeric(d_c_temp)), 2),
+            min = round(min(as.numeric(d_c_temp)), 2),
+            max = round(max(as.numeric(d_c_temp)), 2),
+            num_DA = length(unique(DAUID)),
+            pop = sum(pop_2016))
+# for kilos
+test2 <- test |> 
+  group_by(EQI_class) |> 
+  summarise(mean = round(mean(as.numeric(ndvi)/1000), 2),
+            min = round(min(as.numeric(ndvi)/1000), 2),
+            max = round(max(as.numeric(ndvi)/1000), 2),
+            num_DA = length(unique(DAUID)),
+            pop = sum(pop_2016))
+
+
+
+```
+
+For Deliverable - hot spot analysis city specific
+```{r}
+
+city_list <- unique(city_specific_eqi$city_name)
+
+city_specific_eqi <- unique(city_specific_eqi)
+
+
+for (x in seq_along(city_list)) {
+  
+  c <- city_list[x]
+  
+  eqi_cluster <- find_morans_gi(name_of_city = c,
+                          metric = "EQI")
+  
+  breaks <- c(min(eqi_cluster$localgstar), -2.58, -1.96, -1.65, 1.65, 1.96, 2.58, max(eqi_cluster$localgstar))
+  eqi_cluster <- eqi_cluster %>%
+              mutate(gcluster = cut(localgstar, breaks=breaks, include.lowest = TRUE, labels=c("Cold spot: 99% confidence", "Cold spot: 95% confidence", "Cold spot: 90% confidence", "Not significant","Hot spot: 90% confidence", "Hot spot: 95% confidence", "Hot spot: 99% confidence")))
+  
+sf::write_sf(eqi_cluster, paste0("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/getis_ord_gi_cityspecific/", city_list[x], ".shp"))
+
+} #end loop
+
+file_list <- list.files("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/getis_ord_gi_cityspecific/", full.names = T, pattern = ".shp")
+# combine
+x <- lapply(file_list,  sf::read_sf)
+eqi_cluster <- do.call(rbind, x)
+
+sf::write_sf(eqi_cluster,"/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/getis_ord_gi_cityspecific/combined_getisordgi.shp" )
+
+
+# Find number of DAs classfied as hot or cold spots
+sum <- eqi_cluster |> 
+  filter(gcluster %in% c("Hot spot: 90% confidence", "Hot spot: 95% confidence", "Hot spot: 99% confidence")) 
+length(sum$DAUID)
+
+sum <- eqi_cluster |> 
+  filter(gcluster %in% c("Cold spot: 99% confidence", "Cold spot: 95% confidence", "Cold spot: 90% confidence"))
+length(sum$DAUID)
+
+sum <- eqi_cluster |> 
+  filter(gcluster == "Not significant")
+length(sum$DAUID)
+
+
+
+
+
+
+# combine and save
+
+
+
+sum <- out |> 
+  sf::st_drop_geometry() |> 
+  filter(city_name == "Toronto") |> 
+  unique()
+  filter(gcluster %in% c("Cold spot: 99% confidence","Cold spot: 95% confidence", "Cold spot: 90% confidence")) |> 
+  group_by(city_name) |> 
+  summarise(cold = length(DAUID))
+
+
+
+
+y <- find_morans_gi(name_of_city = "Toronto",
+                          metric = "EQI")
+
+
+# y %>%
+#     ggplot() +
+#     geom_sf(aes(fill= as.numeric(localgstar))) +
+#   scale_fill_gradient2(low = "#7CA9F4", mid = "white", high = "red") +
+#   labs(fill = "localgstar")
+
+# define significance breaks and call them what they are
+breaks <- c(min(y$localgstar), -2.58, -1.96, -1.65, 1.65, 1.96, 2.58, max(eqi_cluster$localgstar))
+y <- y %>%
+              mutate(gcluster = cut(localgstar, breaks=breaks, include.lowest = TRUE, labels=c("Cold spot: 99% confidence", "Cold spot: 95% confidence", "Cold spot: 90% confidence", "Not significant","Hot spot: 90% confidence", "Hot spot: 95% confidence", "Hot spot: 99% confidence")))
+
+# y %>% 
+#     ggplot() +
+#     geom_sf(aes(fill= gcluster)) +
+#   scale_fill_brewer(palette = "RdBu", direction = -1) +
+#   labs(fill = "GI* value")
+
+
+
+
+
+```
+
+
+For delieverable - unexpected relationships
+```{r}
+# watch out! names changes when saved :(
+city_specific_eqi <- sf::read_sf("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/city_specific_eqi_sores/combinedcity_specific_eqi_sores.shp")
+colnames(city_specific_eqi) <- c("DAUID", "city_name", "DA_area","cold_temp", "d_c_temp", "no2", "near_pp", "rd_lngt", "num_nds", "hot_temp", "d_h_temp", "m_d_do_sl", "wtr_dist", "ndvi", "pm25", "pop_2016", "no2_q", "near_pp_q", "rd_lngt_q", "d_c_temp_q", "d_h_temp_q", "m_d_do_sl_q", "wtr_dist_q", "ndvi_q", "pm25_q", "EQI", "geometry" )
+
+
+# Make GGPLOT presentable
+city_specific_eqi$city_name <- gsub("troisrivieres", "Trois Rivieres", city_specific_eqi$city_name) # fix trois rivieres
+city_specific_eqi$city_name <- gsub("stjohns", "St. John's", city_specific_eqi$city_name) # fix St. Johns
+city_specific_eqi$city_name <- gsub("stcatharines_niagara", "St. Catharines ", city_specific_eqi$city_name) # fix St. Catharines
+city_specific_eqi$city_name <- tools::toTitleCase(city_specific_eqi$city_name)
+
+
+unexp <- city_specific_eqi |> 
+  filter((no2_q <=3 & pm25_q <=3) & ndvi_q >= 7)
+
+unexp |> 
+  ggplot() +
+  geom_boxplot(aes(x=city_name, y = EQI)) +
+  cowplot::theme_minimal_grid() +
+  labs(x= "City", y="EQI")+
+  scale_x_discrete(limits=rev) +
+  coord_flip() 
+
+# where are the unexpected areas
+unexp |> 
+  filter(city_name == "Vancouver") |> 
+  ggplot() +
+  geom_sf(aes(fill = EQI))
+
+# how many people
+pop_exp <- unexp |> 
+  sf::st_drop_geometry() |> 
+  group_by(city_name) |> 
+  summarise(pop_exp=sum(pop_2016))
+
+
+xx <- unexp |> 
+  sf::st_drop_geometry() |> 
+  group_by(city_name) |> 
+  summarise(num=n_distinct(DAUID),
+            avg_EQI = mean(EQI))
+
+xxx <- city_specific_eqi |> 
+  sf::st_drop_geometry() |> 
+  group_by(city_name) |> 
+  summarise(avg_EQI = mean(EQI))
+
+xx5 <- merge(xx, xxx, by = "city_name", all.y = T)
+
+xx5 |> ggplot() +
+  geom_point(aes(x=avg_EQI.x, y=city_name)) +
+  geom_point(aes(x=avg_EQI.y, y=city_name), color = "blue") +
+  # geom_path(aes(y=city_name, x = avg_EQI.y - avg_EQI.x)) +
+  scale_y_discrete(limits=rev) +
+  cowplot::theme_cowplot()
+
+
+unexp |> 
+  filter(city_name == "Toronto") |> 
+    ggplot() +
+    geom_sf(aes(fill= as.numeric(EQI))) +
+    scale_fill_gradientn(colors = terrain.colors(20))
+
+
+
+```
+
+EQI national unexpected
+```{r}
+
+unexp_nat <- EQI_5year_index |> 
+  filter((no2_q <=3 & pm25_q <=3) & ndvi_q >= 7)
+
+unexp_nat |> 
+  ggplot() +
+  geom_boxplot(aes(x=city_name, y = EQI)) +
+  cowplot::theme_minimal_grid() +
+  labs(x= "City", y="EQI")+
+  scale_x_discrete(limits=rev) +
+  coord_flip() 
+
+```
+
+
+
+
+
+
+

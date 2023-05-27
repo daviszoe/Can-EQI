@@ -1,0 +1,350 @@
+---
+title: "Step 1: Data summary into DAs"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+  markdown: 
+    wrap: 72
+---
+
+**Step 1: Data summary into DAs** This section takes each of the
+environmental exposures and summarizes them into DA-level values. This
+step must be redone for each city of interest.
+
+**Packages** All packages are referenced using the :: command.
+Therefore, they just need to be installed for the code to work. The only
+package that needs to be turned on manually prior to the code being run
+is tidyverse
+
+List of packages needed: 
+- tidyverse 
+- sf 
+- raster (version 3.1-5; devtools::install_version("raster", version = "3.1-5")) 
+- sp 
+- foreign 
+- zoo
+
+**Common steps** Each section basically works in the same way: a
+function for the exposure type is called it, and you provide it paths to
+the files needed to complete that section. There is then a bit of code
+to check that it ran (visually inspect the output) and there is a list
+of the attribute (columns) created.
+
+**Save Locations and Naming Conventions** The code is set up to be saved
+in an individual folder for each city. The exposure metric is placed in
+the name of the file that is saved. Example:
+"/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/cityname/cityname_exposure.shp"
+
+Summarize buildings
+
+```{r}
+source("/Users/zoedavis/Documents/GitHub/EQI_final/functions/building.R")
+
+# run for each city
+buildings <- building(path_to_DA = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/DAs/Milton_DAs_Final/Milton_DAs_Final.shp",
+                     path_to_building = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Buildings/Ontario_fixed.shp",
+                     city_name = "milton",
+                     save_file_path = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/milton/milton_building.shp")
+
+# check map
+buildings %>% 
+    ggplot() +
+    geom_sf(aes(fill= as.numeric(DA_area))) # note: could be "building_density" or "bldfn_d"
+
+#DA_area = area of the DA (m^2)
+#bldng_c = number of builidngs per DA
+#bldng_d = building density (m^2)
+
+# repeat for each city
+
+```
+
+Summarize NDVI
+
+```{r}
+source("/Users/zoedavis/Documents/GitHub/EQI_final/functions/NDVI.R")
+
+ndvi <- NDVI(raster = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Landsat/NDVI/milton_ndvi.tif",
+             census = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/DAs/Milton_DAs_Final/Milton_DAs_Final.shp",
+             shapefile_save_location = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/milton/milton_NDVI.shp")
+
+# check map
+ndvi %>% 
+    ggplot() +
+    geom_sf(aes(fill= as.numeric(X2014))) 
+
+# X2014 = average NDVI values for the year 2014
+# X2015 = average NDVI values for the year 2015
+# X2016 = average NDVI values for the year 2016
+# X2017 = average NDVI values for the year 2017
+# X2018 = average NDVI values for the year 2018
+
+# repeat for each city
+```
+
+Summarize NO2
+
+```{r}
+source("/Users/zoedavis/Documents/GitHub/EQI_final/functions/NO2.R")
+
+NO2 <- no2(raster = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/NO2/Canada_NO2_LUR_2014_16/Canada_AnnNO2_2014_16.tif",
+         census = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/DAs/Milton_DAs_Final/Milton_DAs_Final.shp",
+         shapefile_save_loc = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/milton/milton_no2.shp")
+
+# check map
+NO2 %>% 
+    ggplot() +
+    geom_sf(aes(fill= as.numeric(no2))) 
+
+# no2 = averge 3-year concentration for nitrogen dioxide
+
+# repeat for each city
+```
+
+Summarize PM2.5
+
+```{r}
+# set up to get PM2.5 files in order
+# only need to do this once
+pm <- raster::stack("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/PM25/V4NA03_PM25_NA_201401_201412-RH35-NoNegs.asc/V4NA03_PM25_NA_201401_201412-RH35-NoNegs.asc")
+
+list_file <- c("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/PM25/V4NA03_PM25_NA_201401_201412-RH35-NoNegs.asc/V4NA03_PM25_NA_201401_201412-RH35-NoNegs.asc",
+               "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/PM25/V4NA03_PM25_NA_201501_201512-RH35-NoNegs.asc/V4NA03_PM25_NA_201501_201512-RH35-NoNegs.asc",
+               "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/PM25/V4NA03_PM25_NA_201601_201612-RH35-NoNegs.asc/V4NA03_PM25_NA_201601_201612-RH35-NoNegs.asc",
+              "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/PM25/V4NA03_PM25_NA_201701_201712-RH35-NoNegs.asc/V4NA03_PM25_NA_201701_201712-RH35-NoNegs.asc",
+              "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/PM25/V4NA03_PM25_NA_201801_201812-RH35-NoNegs.asc/V4NA03_PM25_NA_201801_201812-RH35-NoNegs.asc") 
+
+# combine
+pm <- raster::stack(list_file)
+# rename
+names(pm) <- c("X2014", "X2015", "X2016", "X2017", "X2018")
+
+# save files
+raster::writeRaster(pm, "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/PM25/combined_pm_2014_2018.tif")
+
+# Run on all DAs, need to repeat for each city
+source("/Users/zoedavis/Documents/GitHub/EQI_final/functions/pm2.5.R")
+pm <- PM2.5(raster = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/PM25/combined_pm_2014_2018.tif",
+            census = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/DAs/montrealmetro2.shp",
+            shapefile_save_location = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/montreal/montrealmetro_pm2.5.shp")
+
+# check map
+pm %>% 
+    ggplot() +
+    geom_sf(aes(fill= as.numeric(X2014))) 
+
+# X2014 = average PM2.5 concentration for the year 2014
+# X2015 = average PM2.5 concentration for the year 2015
+# X2016 = average PM2.5 concentration for the year 2016
+# X2017 = average PM2.5 concentration for the year 2017
+# X2018 = average PM2.5 concentration for the year 2018
+
+x <- pm[rowSums(is.na(pm)) >0,]
+# repeat for each city
+```
+
+Summarize power plants
+
+```{r}
+source("/Users/zoedavis/Documents/GitHub/EQI_final/functions/powerplant.R")
+
+power_plant <- powerplant(vector = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/WRI_Powerplants/canada_powerplants.shp",
+                         census = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/DAs/Milton_DAs_Final/Milton_DAs_Final.shp",
+                         city_name = "milton",
+                         shapefile_save_loc = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/milton/milton_powerplant.shp")
+
+# check map
+power_plant %>% 
+    ggplot() +
+    geom_sf(aes(fill= as.numeric(nearest_pp))) 
+
+# nearest_pp = distance to nearest power plant
+
+# repeat for each city
+```
+
+Summarize roads
+
+```{r}
+source("/Users/zoedavis/Documents/GitHub/EQI_final/functions/road.R")
+
+# reading in road layer will save time in the processing
+road_layer <- sf::read_sf("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Roads/lrnf000r16a_e/lrnf000r16a_e.shp")
+
+ROAD <- road(vector = road_layer,
+             census = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/DAs/Milton_DAs_Final/Milton_DAs_Final.shp",
+             city_name = "milton",
+             shapefile_save_loc = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/milton/milton_roads.shp")
+
+# check map
+ROAD %>% 
+    ggplot() +
+    geom_sf(aes(fill= as.numeric(road_length))) 
+
+# rd_lngt = road_length = length of all class 1,2,3,4 roads in each DA
+# num_nds = num_nds = number of intersection of all class 1,2,3,4 roads in each DA
+
+# repeat for each city
+```
+
+Summarize UV
+
+```{r}
+source("/Users/zoedavis/Documents/GitHub/EQI_final/functions/uv.R")
+
+UV <- uv(raster = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/UV/m_d_do_sl.tif",
+         census = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/DAs/Winnipeg_DAs_Final/Winnipeg_DAs_Final.shp",
+         shapefile_save_loc = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/winnipeg/winnipeg_uv.shp")
+
+# check map
+UV %>% 
+    ggplot() +
+    geom_sf(aes(fill= as.numeric(m_d_do_sl))) 
+
+# m_daily_do_sl = m_dly_d_s = Mean daily D dose sea level
+# m_daily_do_alt = m_dly_d_l = mean daily D dose alt
+# m_nn_d_sl = Mean noon D index sea level
+# m_nn_d_alt = Mean noon D index alt
+# m_95_nn_i_sl = m_95_nn__sl = 95th noon D index sea level
+# m_95_nn_i_alt = m_95_nn__l = 95th noon D index alt
+
+# repeat for each city
+```
+
+Summarize water
+
+```{r}
+source("/Users/zoedavis/Documents/GitHub/EQI_final/functions/water.R")
+
+# read in water files first because it goes faster this way
+fresh <- sf::read_sf("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/water/ghy_000c11a_e/ghy_000c11a_e.shp")
+sea <- sf::read_sf("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/water/ghy_000h11a_e/ghy_000h11a_e.shp")
+
+# only use for  Victoria
+#fresh <- sf::read_sf("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/water/fresh_dissolve.shp")
+#sea <- sf::read_sf("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/water/sea_dissolve.shp")
+
+
+
+H2O <- water(path_to_DA = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/DAs/Windsor_DAs_Final/Windsor_DAs_Final.shp",
+      fresh = fresh,
+      sea = sea,
+      city_name = "windsor",
+      save_file_path = "/Users/zoedavis/Documents/untitled folder/out/windsor_water.shp")
+        #"/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/windsor/windsor_water2.shp")
+
+
+
+#H2O <- sf::read_sf("/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/ottawa/ottawa_water.shp")
+# check map
+water %>% 
+    ggplot() +
+    geom_sf(aes(fill= as.numeric(water_dist))) 
+
+# water_dist = distance (m) to nearest water body
+# water_area = area (m^2) of water in each DA
+
+# repeat for each city
+
+```
+
+
+Summarize temperature - heat
+
+```{r}
+# This section allows you to select the days to search in GEE to download 
+source("/Users/zoedavis/Documents/GitHub/EQI_final/functions/select_weather_and_dates.R")
+
+# download weather data
+weather <- weather_stations(city_name = "Vancouver",
+                              prov = "BC")
+
+#identify humid data to search for GEE data; days in which the humidex was above 30 or 35... can see what days could work
+humid_days <- humid(weather_data = weather)
+
+# calculate yearly temperature metrics
+temp_stats <- mean_temperature_values(weather_data = weather) |> 
+  mutate(year = lubridate::year(date)) |> 
+    filter(mean_max_temp_3day > 30 & 
+           mean_min_temp_3day >= 20) |> 
+  group_by(year) |> 
+  summarise(temp = n_distinct(date))
+
+
+
+
+# Extract mean temperature for each DA after downloading Landsat thermal data from GEE
+source("/Users/zoedavis/Documents/GitHub/EQI_final/functions/temperature_difference.R")
+
+temp <-  temp_difference(raster = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/temperature/chicoutimi_temp.tif",
+                         census = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/DAs/Chicoutimi_DAs_Final/Chicoutimi_DAs_Final.shp",
+                         shapefile_save_location =
+                          #"/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/scratch/milton_temp.shp"
+                           "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/chicoutimi/chicoutimi_temp.shp"
+                           ) 
+
+
+
+
+temp %>% 
+    ggplot() +
+    geom_sf(aes(fill= as.numeric(d_DAtemp_mean))) +
+  scale_fill_gradientn(colors = terrain.colors(20)) +
+  labs(fill = "difference in temp")
+
+
+# After you read it back in... column names
+# temprtr = average temeprature within each DA
+# men_tmp = the overall average temperature across the region
+# d_DAtm_ = the difference in temperatrue between the DA mean and the mean of the region
+
+```
+
+
+Summarize temperature - cold
+```{r}
+source("/Users/zoedavis/Documents/GitHub/EQI_final/functions/select_weather_and_dates.R")
+
+# download weather data
+weather <- weather_stations(city_name = "Kelowna",
+                              prov = "BC")
+
+# identify cold days
+cold_days <- cold(weather)
+               
+
+# Extract mean temperature for each DA after downloading Landsat thermal data from GEE
+source("/Users/zoedavis/Documents/GitHub/EQI_final/functions/temperature_difference.R")
+
+temp <-  temp_difference(raster = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/temperature_cold/montreal_cold.tif",
+                         census = "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/DAs/montrealmetro.shp",
+                         type = "cold",
+                         shapefile_save_location =
+                           "/Users/zoedavis/Documents/Projects/PHAC_EQI_2021/Data/Derived/montreal/montreal_cold.shp"
+                           ) 
+
+
+temp %>% 
+    ggplot() +
+    #geom_sf(aes(fill= as.numeric(d_DA_cold_temp_mean))) +
+  geom_sf(aes(fill= as.numeric(temperature))) +
+  scale_fill_gradientn(colors = terrain.colors(20)) +
+  labs(fill = "difference in temp")
+
+# d_DA_cold_temp_mean = difference between city mean and the DA temp
+# mean_cold_temp = overall average temperature for the city
+# cold_temperature  = average temperature within each DA
+
+#temprtr
+#mn_cold_
+#d_DA___
+
+
+```
+
+
+
+
+
+
+
